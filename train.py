@@ -43,6 +43,8 @@ import numpy as np
 import yaml
 
 from api_key import load_api_key
+from decision import (THRESHOLDS, image_scores, rates, cost_per_1000, single_threshold_sweep,
+                      two_threshold_optimum, workload)
 
 # =============================================================================
 # CONFIG - every number here must be justified in REPORT.md
@@ -69,16 +71,19 @@ COST = {
     "tp": 0.0,      # defect present and crew sent: the repair happens anyway,
                     #   so no *extra* cost from the decision
     "tn": 0.0,      # nothing there, nothing done
-    "review": 5.0,  # an inspector looks at one image (~2 min of their time)
+    "review": 1.0,  # an inspector looks at one image (~2 min of their time)
 }
 # How often a track image really contains a defect in production. The test
 # split is NOT representative of this, so every cost is re-weighted by it.
-BASE_RATE = 0.05
+BASE_RATE = 0.02
 
 # Human review capacity, for the "is it realistic" check in REPORT.md
 IMAGES_PER_DAY = 20000      # images the inspection train produces per day
 SECONDS_PER_REVIEW = 120    # time an inspector needs per image
 INSPECTOR_HOURS_PER_DAY = 7
+INSPECTORS_AVAILABLE = 2     # people you can actually put on review
+# Re-cost without retraining:  SWEEP_ONLY=1 uv run python main.py train
+SWEEP_ONLY = os.environ.get("SWEEP_ONLY") == "1"
 # =============================================================================
 
 ROOT = Path(__file__).resolve().parent
@@ -89,7 +94,6 @@ RUNS = ROOT / "runs"
 ART.mkdir(exist_ok=True)
 WEIGHTS.mkdir(exist_ok=True)
 
-THRESHOLDS = np.round(np.arange(0.01, 1.00, 0.01), 2)
 
 
 def log(msg: str) -> None:
@@ -347,82 +351,39 @@ def evaluate_baselines(ft_records: list[dict], device: str, defect_ids: set[int]
 
 
 # -----------------------------------------------------------------------------
-# 6. Cost sweep (image-level decision)
+# 6. Cost sweep (image-level decision) - formulas live in decision.py
 # -----------------------------------------------------------------------------
-def image_scores(records: list[dict], defect_ids: set[int]) -> tuple[np.ndarray, np.ndarray]:
-    y = np.array([any(g["cls"] in defect_ids for g in r["gt"]) for r in records], dtype=bool)
-    s = np.array([max((p["conf"] for p in r["pred"] if p["cls"] in defect_ids), default=0.0) for r in records])
-    return y, s
-
-
-def rates(y: np.ndarray, s: np.ndarray, t_low: float, t_high: float) -> dict:
-    """Share of positives / negatives landing in pass, review, fail."""
-    pos, neg = y, ~y
-    fail = s >= t_high
-    review = (s >= t_low) & ~fail
-    pas = s < t_low
-    n_pos, n_neg = max(pos.sum(), 1), max(neg.sum(), 1)
-    return {
-        "pos_pass": (pos & pas).sum() / n_pos, "pos_review": (pos & review).sum() / n_pos, "pos_fail": (pos & fail).sum() / n_pos,
-        "neg_pass": (neg & pas).sum() / n_neg, "neg_review": (neg & review).sum() / n_neg, "neg_fail": (neg & fail).sum() / n_neg,
-    }
-
-
-def cost_per_1000(r: dict, base_rate: float = BASE_RATE, cost: dict = COST) -> dict:
-    """Expected cost per 1,000 images at the assumed base rate.
-
-    Reviewed images are resolved correctly by the inspector, so a reviewed
-    positive costs review + tp, a reviewed negative costs review + tn.
-    """
-    pi = base_rate
-    c_pos = r["pos_pass"] * cost["fn"] + r["pos_review"] * (cost["review"] + cost["tp"]) + r["pos_fail"] * cost["tp"]
-    c_neg = r["neg_pass"] * cost["tn"] + r["neg_review"] * (cost["review"] + cost["tn"]) + r["neg_fail"] * cost["fp"]
-    total = 1000 * (pi * c_pos + (1 - pi) * c_neg)
-    review_share = pi * r["pos_review"] + (1 - pi) * r["neg_review"]
-    return {"cost_per_1000": round(float(total), 2), "review_share": round(float(review_share), 4),
-            "fn_per_1000": round(float(1000 * pi * r["pos_pass"]), 2),
-            "fp_per_1000": round(float(1000 * (1 - pi) * r["neg_fail"]), 2)}
-
-
 def cost_sweep(y: np.ndarray, s: np.ndarray) -> dict:
-    # Single threshold: fail if score >= t, else pass. No review.
-    rows = []
-    for t in THRESHOLDS:
-        r = rates(y, s, t, t)
-        c = cost_per_1000(r)
-        rows.append({"threshold": float(t), **c, "tpr": round(float(r["pos_fail"]), 4), "fpr": round(float(r["neg_fail"]), 4)})
+    rows = single_threshold_sweep(y, s, BASE_RATE, COST)
     with (ART / "cost_sweep.csv").open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=rows[0].keys()); w.writeheader(); w.writerows(rows)
     best_single = min(rows, key=lambda r: r["cost_per_1000"])
 
-    # Two thresholds: pass < t_low <= review < t_high <= fail.
-    best_two = None
-    for i, t_low in enumerate(THRESHOLDS):
-        for t_high in THRESHOLDS[i:]:
-            c = cost_per_1000(rates(y, s, t_low, t_high))
-            if best_two is None or c["cost_per_1000"] < best_two["cost_per_1000"]:
-                best_two = {"t_low": float(t_low), "t_high": float(t_high), **c}
+    # Capacity: the share of images the available inspectors can actually look at
+    max_review = INSPECTORS_AVAILABLE * INSPECTOR_HOURS_PER_DAY * 3600 / SECONDS_PER_REVIEW / IMAGES_PER_DAY
+    best_two_unconstrained = two_threshold_optimum(y, s, BASE_RATE, COST, 1.0)
+    best_two = two_threshold_optimum(y, s, BASE_RATE, COST, max_review)
+    if best_two is None:          # even zero review would exceed capacity -> fall back to single threshold
+        best_two = {"t_low": best_single["threshold"], "t_high": best_single["threshold"], **best_single}
 
-    # Alternatives the brief asks us to price against
-    do_nothing = cost_per_1000(rates(y, s, 1.01, 1.01))          # everything passes
-    check_everything = cost_per_1000(rates(y, s, 0.0, 1.01))     # everything reviewed
-    model_alone = {"threshold": best_single["threshold"], **{k: best_single[k] for k in ("cost_per_1000", "fn_per_1000", "fp_per_1000")}}
-
-    # Review workload at the two-threshold optimum
-    images_reviewed = IMAGES_PER_DAY * best_two["review_share"]
-    hours = images_reviewed * SECONDS_PER_REVIEW / 3600
-    workload = {"images_per_day": IMAGES_PER_DAY, "reviewed_per_day": round(images_reviewed, 1),
-                "inspector_hours_per_day": round(hours, 1),
-                "inspectors_needed": round(hours / INSPECTOR_HOURS_PER_DAY, 2)}
+    do_nothing = cost_per_1000(rates(y, s, 1.01, 1.01), BASE_RATE, COST)       # everything passes
+    check_everything = cost_per_1000(rates(y, s, 0.0, 1.01), BASE_RATE, COST)  # everything reviewed
+    model_alone = {"threshold": best_single["threshold"], **best_single}
 
     op = {
         "decision_unit": "track image; positive = contains >=1 defect instance; score = max defect confidence",
         "cost_matrix_eur": COST, "base_rate": BASE_RATE,
+        "capacity": {"images_per_day": IMAGES_PER_DAY, "seconds_per_review": SECONDS_PER_REVIEW,
+                     "inspector_hours_per_day": INSPECTOR_HOURS_PER_DAY, "inspectors_available": INSPECTORS_AVAILABLE,
+                     "max_review_share": round(max_review, 4)},
         "test_split_positive_share": round(float(y.mean()), 4), "test_images": int(len(y)),
         "single_threshold_optimum": best_single,
         "two_threshold_optimum": best_two,
+        "two_threshold_optimum_unconstrained": best_two_unconstrained,
         "alternatives": {"do_nothing": do_nothing, "human_checks_everything": check_everything, "model_alone": model_alone},
-        "review_workload": workload,
+        "review_workload": workload(best_two["review_share"], IMAGES_PER_DAY, SECONDS_PER_REVIEW, INSPECTOR_HOURS_PER_DAY),
+        "review_workload_unconstrained": workload(best_two_unconstrained["review_share"], IMAGES_PER_DAY,
+                                                 SECONDS_PER_REVIEW, INSPECTOR_HOURS_PER_DAY),
     }
     (ART / "operating_point.json").write_text(json.dumps(op, indent=2))
     log("operating point:\n" + json.dumps(op, indent=2))
@@ -432,7 +393,7 @@ def cost_sweep(y: np.ndarray, s: np.ndarray) -> dict:
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.plot([r["threshold"] for r in rows], [r["cost_per_1000"] for r in rows], label="single threshold (no review)")
-    ax.axvline(best_single["threshold"], ls="--", c="C3", label=f"chosen t={best_single['threshold']:.2f}")
+    ax.axvline(best_single["threshold"], ls="--", c="C3", label=f"model alone, t={best_single['threshold']:.2f}")
     ax.axvspan(best_two["t_low"], best_two["t_high"], alpha=0.15, color="C1",
                label=f"review band [{best_two['t_low']:.2f}, {best_two['t_high']:.2f})")
     ax.set_xlabel("confidence threshold"); ax.set_ylabel("expected cost per 1,000 images (EUR)")
@@ -451,6 +412,13 @@ def main() -> None:
     log(f"classes={names}  defect classes={[names[i] for i in sorted(defect_ids)]}")
     if not defect_ids:
         raise SystemExit("No class matched DEFECT_KEYWORDS; fix CONFIG.")
+
+    if SWEEP_ONLY:
+        log("SWEEP_ONLY=1: re-costing saved test predictions, no training")
+        dump = json.loads((ART / "test_predictions.json").read_text())
+        y, s = image_scores(dump["records"], set(dump["defect_class_ids"]))
+        cost_sweep(y, s)
+        return
 
     describe_dataset(yaml_path, names, defect_ids)
     weights = finetune(yaml_path, device)

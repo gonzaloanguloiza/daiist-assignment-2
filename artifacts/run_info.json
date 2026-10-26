@@ -1,0 +1,13 @@
+{
+  "dataset": "railway-defects-osolv/fastener-detection-7a3vn/v1",
+  "base_model": "yolo11n.pt",
+  "epochs": 60,
+  "imgsz": 640,
+  "batch": 16,
+  "seed": 42,
+  "device": "mps",
+  "machine": "macOS-27.0.1-arm64-arm-64bit",
+  "torch": "2.11.0",
+  "ultralytics": "8.4.173",
+  "minutes": 55.5
+}

@@ -1,0 +1,92 @@
+{
+  "decision_unit": "track image; positive = contains >=1 defect instance; score = max defect confidence",
+  "cost_matrix_eur": {
+    "fn": 2000.0,
+    "fp": 150.0,
+    "tp": 0.0,
+    "tn": 0.0,
+    "review": 1.0
+  },
+  "base_rate": 0.02,
+  "capacity": {
+    "images_per_day": 20000,
+    "seconds_per_review": 120,
+    "inspector_hours_per_day": 7,
+    "inspectors_available": 2,
+    "max_review_share": 0.021
+  },
+  "test_split_positive_share": 0.4435,
+  "test_images": 248,
+  "single_threshold_optimum": {
+    "threshold": 0.07,
+    "cost_per_1000": 15871.54,
+    "review_share": 0.0,
+    "fn_per_1000": 5.27,
+    "fp_per_1000": 35.51,
+    "tp_per_1000": 14.73,
+    "tn_per_1000": 944.49,
+    "tpr": 0.7364,
+    "fpr": 0.0362
+  },
+  "two_threshold_optimum": {
+    "t_low": 0.07,
+    "t_high": 0.58,
+    "cost_per_1000": 13758.22,
+    "review_share": 0.0171,
+    "fn_per_1000": 5.27,
+    "fp_per_1000": 21.3,
+    "tp_per_1000": 11.82,
+    "tn_per_1000": 944.49
+  },
+  "two_threshold_optimum_unconstrained": {
+    "t_low": 0.06,
+    "t_high": 0.91,
+    "cost_per_1000": 10239.34,
+    "review_share": 0.0575,
+    "fn_per_1000": 5.09,
+    "fp_per_1000": 0.0,
+    "tp_per_1000": 0.0,
+    "tn_per_1000": 937.39
+  },
+  "alternatives": {
+    "do_nothing": {
+      "cost_per_1000": 40000.0,
+      "review_share": 0.0,
+      "fn_per_1000": 20.0,
+      "fp_per_1000": 0.0,
+      "tp_per_1000": 0.0,
+      "tn_per_1000": 980.0
+    },
+    "human_checks_everything": {
+      "cost_per_1000": 1000.0,
+      "review_share": 1.0,
+      "fn_per_1000": 0.0,
+      "fp_per_1000": 0.0,
+      "tp_per_1000": 0.0,
+      "tn_per_1000": 0.0
+    },
+    "model_alone": {
+      "threshold": 0.07,
+      "cost_per_1000": 15871.54,
+      "review_share": 0.0,
+      "fn_per_1000": 5.27,
+      "fp_per_1000": 35.51,
+      "tp_per_1000": 14.73,
+      "tn_per_1000": 944.49,
+      "tpr": 0.7364,
+      "fpr": 0.0362
+    }
+  },
+  "review_workload": {
+    "images_per_day": 20000,
+    "reviewed_per_day": 342.0,
+    "inspector_hours_per_day": 11.4,
+    "inspectors_needed": 1.63
+  },
+  "review_workload_unconstrained": {
+    "images_per_day": 20000,
+    "reviewed_per_day": 1150.0,
+    "inspector_hours_per_day": 38.3,
+    "inspectors_needed": 5.48
+  }
+}

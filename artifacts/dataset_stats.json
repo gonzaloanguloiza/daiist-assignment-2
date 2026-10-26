@@ -1,0 +1,70 @@
+{
+  "classes": [
+    "Defective Joint",
+    "Good Fasteners",
+    "Good Joint",
+    "Missing Dogscrew",
+    "Missing Fastener"
+  ],
+  "defect_class_ids": [
+    0,
+    3,
+    4
+  ],
+  "splits": {
+    "train": {
+      "images": 2057,
+      "labelled_images": 2057,
+      "images_with_defect": 903,
+      "positive_share": 0.439,
+      "instances_per_class": {
+        "Defective Joint": 299,
+        "Good Fasteners": 1433,
+        "Good Joint": 385,
+        "Missing Dogscrew": 68,
+        "Missing Fastener": 727
+      },
+      "box_area_share_of_image": {
+        "median": 0.09382,
+        "p10": 0.00823,
+        "p90": 0.44317
+      }
+    },
+    "valid": {
+      "images": 266,
+      "labelled_images": 266,
+      "images_with_defect": 105,
+      "positive_share": 0.3947,
+      "instances_per_class": {
+        "Defective Joint": 41,
+        "Good Fasteners": 177,
+        "Good Joint": 52,
+        "Missing Dogscrew": 15,
+        "Missing Fastener": 71
+      },
+      "box_area_share_of_image": {
+        "median": 0.10588,
+        "p10": 0.00739,
+        "p90": 0.43515
+      }
+    },
+    "test": {
+      "images": 248,
+      "labelled_images": 248,
+      "images_with_defect": 110,
+      "positive_share": 0.4435,
+      "instances_per_class": {
+        "Defective Joint": 31,
+        "Good Fasteners": 174,
+        "Good Joint": 52,
+        "Missing Dogscrew": 8,
+        "Missing Fastener": 96
+      },
+      "box_area_share_of_image": {
+        "median": 0.08995,
+        "p10": 0.01047,
+        "p90": 0.45233
+      }
+    }
+  }
+}
